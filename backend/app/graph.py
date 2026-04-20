@@ -23,9 +23,11 @@ import pytesseract
 from PIL import Image
 from pdf2image import convert_from_bytes
 from dotenv import load_dotenv
+from pathlib import Path
  
 # ── Load .env ────────────────────────────────────────────────
-load_dotenv()
+env_path = Path(__file__).parent / ".env"
+load_dotenv(dotenv_path=env_path)
 
 print("=" * 50)
 print(f"POPPLER_PATH  : {os.getenv('POPPLER_PATH')}")
@@ -77,6 +79,7 @@ class State(TypedDict):
     llm_output       : dict
     critic_output    : dict
     retries          : int
+    language         : str           # Target language for output
  
  
 # ============================================================
@@ -272,12 +275,14 @@ def blocked_node(state: State):
     No medical advice — only a calm doctor referral.
     """
     output = {
-        "summary"         : (
-            "Some values in your report may need medical attention. "
-            "Please consult a qualified doctor at the earliest."
-        ),
+        "summary"         : {
+            "en": "Some values in your report may need medical attention. Please consult a qualified doctor at the earliest.",
+            "hi": "आपकी रिपोर्ट में कुछ मानों पर चिकित्सा ध्यान देने की आवश्यकता हो सकती है। कृपया जल्द से जल्द किसी योग्य डॉक्टर से परामर्श लें।",
+            "hinglish": "Aapki report mein kuch values ko medical attention ki zaroorat ho sakti hai. Please jaldi se jaldi kisi qualified doctor se consult karein."
+        },
         "risk_level"      : "critical",
-        "diet_suggestions": []   # Always empty for critical reports
+        "parameters"      : [],
+        "diet_suggestions": { "en": [], "hi": [], "hinglish": [] }   # Always empty for critical reports
     }
     return {"llm_output": output, "confidence": 0.0}
  
@@ -292,12 +297,14 @@ def report_failure_node(state: State):
     Gives the user a clear message instead of a blank screen.
     """
     output = {
-        "summary"         : (
-            "We were unable to read the values from your report. "
-            "Please try uploading a clearer image or a text-based PDF."
-        ),
+        "summary"         : {
+            "en": "We were unable to read the values from your report. Please try uploading a clearer image or a text-based PDF.",
+            "hi": "हम आपकी रिपोर्ट से मानों को पढ़ने में असमर्थ रहे। कृपया एक स्पष्ट छवि या पाठ-आधारित PDF अपलोड करने का प्रयास करें।",
+            "hinglish": "Hum aapki report se values read nahi kar paye. Please ek clearer image ya text-based PDF upload karne ka try karein."
+        },
         "risk_level"      : "unknown",
-        "diet_suggestions": []
+        "parameters"      : [],
+        "diet_suggestions": { "en": [], "hi": [], "hinglish": [] }
     }
     return {"llm_output": output}
  
@@ -320,33 +327,38 @@ Blood report values:
  
 Standard reference ranges:
 {ranges}
- 
+
 Generate a response with these fields:
-- summary         : 2–3 sentences, simple language, no panic
-- risk_level      : one of — normal | borderline | mild | critical
-- diet_suggestions: list of safe general suggestions (empty list if risk is high)
- 
+- summary         : object with 3 keys ("en", "hi", "hinglish") containing 2–3 sentences, simple language, no panic.
+- risk_level      : one of — normal | borderline | mild | critical (keep this exact value in English).
+- parameters      : an array of objects for each extracted parameter. Each object must have:
+    - parameter_name   : string
+    - explanation      : object with 3 keys ("en", "hi", "hinglish") explaining what this parameter is and what its current value means.
+    - nutrition_guide  : object with 3 keys ("en", "hi", "hinglish") detailing what diet, vitamin, mineral, or food will make it better. Always provide this regardless of risk level.
+- diet_suggestions: object with 3 keys ("en", "hi", "hinglish"), each being a list of general safe suggestions not tied to a specific parameter (empty lists if risk is high).
+
 Rules:
-- If risk_level is critical or mild, set diet_suggestions to []
-- Never use alarming language
-- If anything looks concerning, recommend seeing a doctor
- 
-Return ONLY a valid JSON object, no markdown fences.
+- Provide all translations for "en" (English), "hi" (Hindi), and "hinglish" (Hindi words in English script).
+- If risk_level is critical or mild, set all lists in the global diet_suggestions object to []. Do NOT empty the nutrition_guide in parameters.
+- Never use alarming language.
+- If anything looks concerning, recommend seeing a doctor.
+- Return ONLY a valid JSON object, no markdown fences.
 """)
  
     chain = prompt | llm
     response = chain.invoke({
-        "data"  : json.dumps(state["extracted_data"], indent=2),
-        "ranges": REFERENCE_RANGES
+        "data"    : json.dumps(state["extracted_data"], indent=2),
+        "ranges"  : REFERENCE_RANGES
     })
  
     output = parse_llm_json(response.content, "analyzer_node")
  
     if output is None:
         output = {
-            "summary"         : "Analysis could not be completed. Please consult a doctor.",
+            "summary"         : { "en": "Analysis could not be completed. Please consult a doctor.", "hi": "विश्लेषण पूरा नहीं हो सका। कृपया डॉक्टर से सलाह लें।", "hinglish": "Analysis complete nahi ho saka. Please doctor se consult karein." },
             "risk_level"      : "unknown",
-            "diet_suggestions": []
+            "parameters"      : [],
+            "diet_suggestions": { "en": [], "hi": [], "hinglish": [] }
         }
  
     return {"llm_output": output}
@@ -373,8 +385,9 @@ Generated analysis:
  
 Check the following:
 1. Is risk_level consistent with the actual numeric values?
-2. Are diet_suggestions empty when risk_level is critical or mild?
+2. Are global diet_suggestions empty lists when risk_level is critical or mild?
 3. Is the tone calm — no panic, no alarming words?
+4. Are all text fields objects with exactly 3 keys: "en", "hi", "hinglish"?
  
 Return ONLY a valid JSON object, no markdown fences:
 {{
@@ -577,7 +590,7 @@ print(graph)
 # RUN FUNCTION (called by FastAPI)
 # ============================================================
  
-def run_graph(file_bytes: bytes) -> dict:
+def run_graph(file_bytes: bytes, language: str = "en") -> dict:
     """
     Entry point for FastAPI.
     Initialises state and invokes the graph.
@@ -594,7 +607,8 @@ def run_graph(file_bytes: bytes) -> dict:
         "is_critical"     : False,
         "llm_output"      : {},
         "critic_output"   : {},
-        "retries"         : 0
+        "retries"         : 0,
+        "language"        : language
     }
  
     result = graph.invoke(initial_state)

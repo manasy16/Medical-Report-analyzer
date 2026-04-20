@@ -6,7 +6,7 @@
 import uuid
 import asyncio
 import traceback
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from graph import run_graph
@@ -33,7 +33,7 @@ jobs: dict = {}
 # ============================================================
 
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(file: UploadFile = File(...), language: str = Form("en")):
 
     # ── File type check ───────────────────────────────────────
     allowed = {"application/pdf", "image/jpeg", "image/png", "image/jpg"}
@@ -55,8 +55,8 @@ async def upload_file(file: UploadFile = File(...)):
         # ── Run the LangGraph pipeline ────────────────────────
         # asyncio.to_thread() runs the sync graph.invoke() in a
         # separate thread so FastAPI's event loop stays unblocked
-        print(f"[PIPELINE] Starting graph for job {job_id[:8]}...")
-        result = await asyncio.to_thread(run_graph, file_bytes)
+        print(f"[PIPELINE] Starting graph for job {job_id[:8]} with language {language}...")
+        result = await asyncio.to_thread(run_graph, file_bytes, language)
 
         jobs[job_id] = {"status": "done", "result": result, "error": None}
         print(f"[PIPELINE] Done — job {job_id[:8]}")
@@ -118,6 +118,7 @@ def get_result(job_id: str):
         "extracted_values" : ext_data,
         "summary"          : llm_out.get("summary",          ""),
         "risk_level"       : llm_out.get("risk_level",       "unknown"),
+        "parameters"       : llm_out.get("parameters",       []) or [],
         "diet_suggestions" : llm_out.get("diet_suggestions", []) or [],
         "critic_valid"     : critic.get("is_valid", None),
         "critic_safe"      : critic.get("safe",     None),

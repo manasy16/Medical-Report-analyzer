@@ -7,12 +7,14 @@ import { Switch } from '../ui/switch';
 
 export default function SummaryPanel() {
   const { t } = useTranslation();
-  const { resultData } = useAppStore();
+  const { resultData, language } = useAppStore();
   const [isSimple, setIsSimple] = useState(true);
 
   if (!resultData || !resultData.summary) return null;
 
-  let summaryText = resultData.summary;
+  let summaryText = typeof resultData.summary === 'string' 
+    ? resultData.summary 
+    : (resultData.summary[language] || resultData.summary['en'] || '');
 
   // Simulate technical vs simple view by appending context if technical
   const displayText = isSimple 

@@ -9,7 +9,7 @@ import { uploadReport, getReportResult } from '../../services/api';
 
 export default function Upload() {
   const { t } = useTranslation();
-  const { setFile, setReportId, setUploadStatus, setResultData, setError, error } = useAppStore();
+  const { setFile, setReportId, setUploadStatus, setResultData, setError, error, language } = useAppStore();
   const [localFile, setLocalFile] = useState(null);
 
   const onDrop = useCallback((acceptedFiles) => {
@@ -38,7 +38,7 @@ export default function Upload() {
 
     try {
       // 1. Upload and wait for full processing
-      const uploadResp = await uploadReport(localFile);
+      const uploadResp = await uploadReport(localFile, language);
       const jobId = uploadResp.job_id;
       setReportId(jobId);
 

@@ -6,14 +6,17 @@ import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
 
 export default function DietSuggestions() {
   const { t } = useTranslation();
-  const { resultData } = useAppStore();
+  const { resultData, language } = useAppStore();
 
   const isCritical = resultData?.is_critical || resultData?.risk_level === 'critical';
 
   // Hide if critical
   if (isCritical) return null;
 
-  const suggestions = resultData?.diet_suggestions || [];
+  const rawSuggestions = resultData?.diet_suggestions;
+  const suggestions = Array.isArray(rawSuggestions) 
+    ? rawSuggestions 
+    : (rawSuggestions?.[language] || rawSuggestions?.['en'] || []);
 
   if (suggestions.length === 0) return null;
 

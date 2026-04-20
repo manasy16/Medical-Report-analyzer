@@ -2,9 +2,12 @@ import axios from 'axios';
 
 const BASE_URL = 'http://127.0.0.1:8000';
 
-export const uploadReport = async (file) => {
+export const uploadReport = async (file, language) => {
   const formData = new FormData();
   formData.append("file", file);
+  if (language) {
+    formData.append("language", language);
+  }
   
   // This endpoint now waits for the full processing to finish
   const response = await axios.post(`${BASE_URL}/upload`, formData, {
