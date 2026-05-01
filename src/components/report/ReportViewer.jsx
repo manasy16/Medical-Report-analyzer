@@ -21,7 +21,19 @@ export default function ReportViewer() {
           <FileIcon className="w-5 h-5 text-primary" />
           {t('report_viewer')}
         </CardTitle>
-        <Button variant="outline" size="sm" className="gap-2" onClick={() => window.open(fileUrl)}>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          className="gap-2" 
+          onClick={() => {
+            const link = document.createElement('a');
+            link.href = fileUrl;
+            link.download = file.name;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+          }}
+        >
           <FileDown className="w-4 h-4" />
           {t('export_btn')}
         </Button>

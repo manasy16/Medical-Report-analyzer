@@ -1,17 +1,20 @@
 {
   "en": {
     "translation": {
-      "app_title": "AI Blood Report Analyzer",
-      "upload_title": "Upload your blood report",
-      "upload_desc": "Drag & drop your PDF or Image here",
-      "upload_btn": "Select File",
+      "app_title": "AI Medical Report Analyzer",
+      "upload_title": "Analyze Your Medical Report",
+      "upload_subtitle": "Instant AI-powered insights for your family health.",
+      "upload_desc": "Drop your report here",
+      "supported_types": "Supported: Blood Count, Lipid Panel, Thyroid, Liver, Kidney, Diabetes, Urine reports",
+      "upload_btn": "Choose File",
       "processing_title": "Processing Report...",
       "step_extracting": "Extracting Data...",
       "step_analyzing": "Analyzing Parameters...",
       "step_summarizing": "Generating Summary...",
       "error_upload": "Failed to upload file. Please try again.",
       "error_process": "Error processing report. It might be unreadable.",
-      "dashboard_title": "Your Report Dashboard",
+      "dashboard_title": "Health Analysis Dashboard",
+      "dashboard_subtitle": "Personalized insights based on your recent report.",
       "summary": "Report Summary",
       "technical_view": "Technical",
       "simple_view": "Simple",
@@ -22,14 +25,18 @@
       "trends": "Health Trends",
       "report_viewer": "Original Document",
       "export_btn": "Export PDF",
-      "try_again": "Try Another Report"
+      "try_again": "Try Another Report",
+      "no_parameters": "No individual parameter details available.",
+      "unknown_report_warning": "We could not fully identify your report type. Results may be incomplete. Please consult a doctor for a full interpretation."
     }
   },
   "hi": {
     "translation": {
-      "app_title": "AI ब्लड रिपोर्ट एनालाइज़र",
-      "upload_title": "अपनी ब्लड रिपोर्ट यहाँ अपलोड करें",
-      "upload_desc": "यहाँ अपनी PDF या इमेज ड्रैग और ड्रॉप करें",
+      "app_title": "AI मेडिकल रिपोर्ट एनालाइज़र",
+      "upload_title": "अपनी मेडिकल रिपोर्ट एनालाइज करें",
+      "upload_subtitle": "आपके परिवार के स्वास्थ्य के लिए तत्काल एआई-संचालित अंतर्दृष्टि।",
+      "upload_desc": "अपनी रिपोर्ट यहाँ डालें",
+      "supported_types": "समर्थित: ब्लड काउंट, लिपिड पैनल, थायराइड, लिवर, किडनी, मधुमेह, मूत्र (Urine) रिपोर्ट",
       "upload_btn": "फाइल चुनें",
       "processing_title": "रिपोर्ट प्रोसेस हो रही है...",
       "step_extracting": "डेटा निकाला जा रहा है...",
@@ -37,7 +44,8 @@
       "step_summarizing": "समरी तैयार हो रही है...",
       "error_upload": "फाइल अपलोड नहीं हो पाई। फिर से कोशिश करें।",
       "error_process": "रिपोर्ट प्रोसेस करने में दिक्कत आई। शायद यह साफ़ नहीं है।",
-      "dashboard_title": "आपका रिपोर्ट डैशबोर्ड",
+      "dashboard_title": "स्वास्थ्य विश्लेषण डैशबोर्ड",
+      "dashboard_subtitle": "आपकी हालिया रिपोर्ट के आधार पर व्यक्तिगत अंतर्दृष्टि।",
       "summary": "रिपोर्ट की समरी",
       "technical_view": "टेक्निकल",
       "simple_view": "आसान",
@@ -48,14 +56,18 @@
       "trends": "हेल्थ ट्रेंड्स",
       "report_viewer": "ओरिजिनल डॉक्यूमेंट",
       "export_btn": "PDF डाउनलोड करें",
-      "try_again": "दूसरी रिपोर्ट चेक करें"
+      "try_again": "दूसरी रिपोर्ट चेक करें",
+      "no_parameters": "कोई व्यक्तिगत पैरामीटर विवरण उपलब्ध नहीं है।",
+      "unknown_report_warning": "हम आपकी रिपोर्ट के प्रकार की पूरी तरह से पहचान नहीं कर सके। परिणाम अधूरे हो सकते हैं। कृपया पूर्ण व्याख्या के लिए डॉक्टर से परामर्श करें।"
     }
   },
   "hinglish": {
     "translation": {
-      "app_title": "AI Blood Report Analyzer",
-      "upload_title": "Apna blood report yahan upload kare",
-      "upload_desc": "PDF ya image drag & drop kare",
+      "app_title": "AI Medical Report Analyzer",
+      "upload_title": "Apna Medical Report Analyze Kare",
+      "upload_subtitle": "Instant AI-powered insights aapki family health ke liye.",
+      "upload_desc": "Apni report yahan drop kare",
+      "supported_types": "Supported: Blood Count, Lipid Panel, Thyroid, Liver, Kidney, Diabetes, Urine reports",
       "upload_btn": "File Select Kare",
       "processing_title": "Aapka report process ho raha hai...",
       "step_extracting": "Data extract ho raha hai...",
@@ -63,7 +75,8 @@
       "step_summarizing": "Summary ban rahi hai...",
       "error_upload": "File upload fail ho gaya. Try again.",
       "error_process": "Report read karne mein error aayi.",
-      "dashboard_title": "Aapka Report Dashboard",
+      "dashboard_title": "Health Analysis Dashboard",
+      "dashboard_subtitle": "Aapki recent report ke basis par personalized insights.",
       "summary": "Report Summary",
       "technical_view": "Technical",
       "simple_view": "Simple",
@@ -74,7 +87,9 @@
       "trends": "Health Trends",
       "report_viewer": "Original Document",
       "export_btn": "Export PDF",
-      "try_again": "Doosri Report Check Kare"
+      "try_again": "Doosri Report Check Kare",
+      "no_parameters": "No individual parameter details available.",
+      "unknown_report_warning": "Hum aapki report type ko puri tarah identify nahi kar paye. Results incomplete ho sakte hain. Interpret karne ke liye doctor se milein."
     }
   }
 }

@@ -1,12 +1,20 @@
 import React from 'react';
+import { Routes, Route } from 'react-router-dom';
 import Navbar from './components/layout/Navbar';
+import Landing from './components/layout/Landing';
 import Upload from './components/upload/Upload';
 import Processing from './components/processing/Processing';
 import Dashboard from './components/dashboard/Dashboard';
 import useAppStore from './store/useAppStore';
+import Login from './pages/auth/Login';
+import Signup from './pages/auth/Signup';
 
 function App() {
   const { uploadStatus } = useAppStore();
+  const [showApp, setShowApp] = React.useState(false);
+
+  // If already uploading or completed, we should definitely show the app
+  const isActiveSession = uploadStatus !== 'idle' || showApp;
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans selection:bg-primary/30">
@@ -17,11 +25,23 @@ function App() {
 
       <Navbar />
 
-      <main className="container mx-auto px-4 py-8">
-        {(uploadStatus === 'idle' || uploadStatus === 'error') && <Upload />}
-        {(uploadStatus === 'uploading' || uploadStatus === 'processing') && <Processing />}
-        {uploadStatus === 'completed' && <Dashboard />}
-      </main>
+      <Routes>
+        <Route path="/" element={
+          <main className="container mx-auto px-4 py-8">
+            {!isActiveSession ? (
+              <Landing onStart={() => setShowApp(true)} />
+            ) : (
+              <>
+                {(uploadStatus === 'idle' || uploadStatus === 'error') && <Upload />}
+                {(uploadStatus === 'uploading' || uploadStatus === 'processing') && <Processing />}
+                {uploadStatus === 'completed' && <Dashboard />}
+              </>
+            )}
+          </main>
+        } />
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
+      </Routes>
     </div>
   );
 }

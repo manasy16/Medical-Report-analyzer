@@ -6,6 +6,10 @@ pdf2image
 langchain
 langgraph
 langchain-google-genai
-
 python-multipart
 python-dotenv
+sqlalchemy
+passlib[bcrypt]
+pyjwt
+python-jose[cryptography]
+email-validator

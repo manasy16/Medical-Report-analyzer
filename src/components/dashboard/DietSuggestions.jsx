@@ -14,11 +14,9 @@ export default function DietSuggestions() {
   if (isCritical) return null;
 
   const rawSuggestions = resultData?.diet_suggestions;
-  const suggestions = Array.isArray(rawSuggestions) 
-    ? rawSuggestions 
-    : (rawSuggestions?.[language] || rawSuggestions?.['en'] || []);
+  const suggestions = rawSuggestions?.[language] || [];
 
-  if (suggestions.length === 0) return null;
+  if (!suggestions || suggestions.length === 0) return null;
 
   return (
     <Card className="glass-card h-full">

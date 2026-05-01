@@ -1,14 +1,57 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileText, Info } from 'lucide-react';
+import { FileText, Info, Download } from 'lucide-react';
 import useAppStore from '../../store/useAppStore';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
 import { Switch } from '../ui/switch';
+import { Button } from '../ui/button';
 
 export default function SummaryPanel() {
   const { t } = useTranslation();
   const { resultData, language } = useAppStore();
   const [isSimple, setIsSimple] = useState(true);
+
+  const handleDownload = () => {
+    if (!resultData) return;
+    const summary = typeof resultData.summary === 'string' 
+      ? resultData.summary 
+      : (resultData.summary[language] || resultData.summary['en'] || '');
+
+    const parameters = resultData.parameters || [];
+    const extractedValues = resultData.extracted_values || {};
+
+    let content = `MEDICAL REPORT ANALYSIS\n`;
+    content += `======================\n\n`;
+    content += `Risk Level: ${(resultData.risk_level || 'unknown').toUpperCase()}\n\n`;
+    content += `SUMMARY:\n`;
+    content += `${summary}\n\n`;
+
+    if (parameters.length > 0) {
+      content += `DETAILED ANALYSIS:\n`;
+      parameters.forEach(p => {
+        const expl = typeof p.explanation === 'string' ? p.explanation : (p.explanation[language] || p.explanation['en'] || '');
+        content += `- ${p.parameter_name}: ${expl}\n`;
+      });
+      content += `\n`;
+    }
+
+    content += `EXTRACTED VALUES:\n`;
+    Object.entries(extractedValues).forEach(([key, val]) => {
+      content += `- ${key}: ${val.value || 'N/A'} ${val.unit || ''}\n`;
+    });
+
+    content += `\nGenerated on: ${new Date().toLocaleString()}\n`;
+
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Summary_${new Date().toISOString().split('T')[0]}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   if (!resultData || !resultData.summary) return null;
 
@@ -30,6 +73,11 @@ export default function SummaryPanel() {
           {t('summary', 'Report Summary')}
         </CardTitle>
         <div className="flex items-center gap-3">
+          <Button variant="ghost" size="sm" onClick={handleDownload} className="text-primary hover:bg-primary/10 gap-2">
+            <Download className="w-4 h-4" />
+            {t('download', 'Download')}
+          </Button>
+          <div className="h-4 w-px bg-border/50 mx-1" />
           <span className={`text-sm ${!isSimple ? 'text-primary font-medium' : 'text-muted-foreground'}`}>{t('technical_view', 'Technical')}</span>
           <Switch 
             checked={isSimple} 
