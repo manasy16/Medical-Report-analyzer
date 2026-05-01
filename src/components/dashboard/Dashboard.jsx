@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { RotateCcw, Download, Share2, RefreshCcw } from 'lucide-react';
+import { RotateCcw, Download, Share2, RefreshCcw, TrendingUp } from 'lucide-react';
 import useAppStore from '../../store/useAppStore';
 import SummaryPanel from './SummaryPanel';
 import RiskAlert from './RiskAlert';
@@ -162,10 +162,25 @@ export default function Dashboard() {
       <SummaryPanel />
 
       {token && resultData?.parameters && resultData.parameters.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          {resultData.parameters.slice(0, 2).map(p => (
-            <TrendChart key={p.parameter_name} parameter={p.parameter_name} />
-          ))}
+        <div className="mb-8 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-200">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xl font-semibold flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-primary" />
+              Health Trends & Progress
+            </h3>
+            <p className="text-xs text-muted-foreground hidden sm:block">Compare your current results with previous records</p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {resultData.parameters
+              .filter(p => {
+                // Only show trend if it's a likely numeric parameter (optional filter)
+                return true; 
+              })
+              .slice(0, 4)
+              .map(p => (
+                <TrendChart key={p.parameter_name} parameter={p.parameter_name} />
+              ))}
+          </div>
         </div>
       )}
 

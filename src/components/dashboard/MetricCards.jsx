@@ -2,7 +2,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import useAppStore from '../../store/useAppStore';
 import { Card, CardContent } from '../ui/card';
-import { Activity, ArrowDownRight, ArrowUpRight, CheckCircle, HelpCircle } from 'lucide-react';
+import { Activity, ArrowDownRight, ArrowUpRight, CheckCircle, HelpCircle, TrendingUp, TrendingDown } from 'lucide-react';
 
 export default function MetricCards() {
   const { t } = useTranslation();
@@ -34,20 +34,40 @@ export default function MetricCards() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {parameters.map((pInfo) => {
           const key = pInfo.parameter_name;
-          const item = extractedValues[key];
+          // Robust lookup: try exact key, then case-insensitive, then snake_case
+          let item = extractedValues[key];
+          if (!item) {
+            const normalizedKey = key.toLowerCase().replace(/\s+/g, '_');
+            const foundKey = Object.keys(extractedValues).find(k => 
+              k.toLowerCase() === normalizedKey || k.toLowerCase() === key.toLowerCase()
+            );
+            if (foundKey) item = extractedValues[foundKey];
+          }
           
-          const isHigh = item?.status === 'high';
-          const isLow = item?.status === 'low';
-          const isNormal = item?.status === 'normal';
-          const hasStatus = isHigh || isLow || isNormal;
+          const status = pInfo.status || item?.status;
+          const isHigh = status === 'high';
+          const isLow = status === 'low';
+          const isNormal = status === 'normal';
+          const isAbnormal = status === 'abnormal';
+          const hasStatus = isHigh || isLow || isNormal || isAbnormal;
 
           return (
             <Card key={key} className={`glass-card overflow-hidden transition-all hover:-translate-y-1 ${!isNormal && hasStatus ? 'border-destructive/30' : ''}`}>
               <CardContent className="p-5 flex flex-col h-full">
                 <div className="flex justify-between items-start mb-2">
                   <span className="font-medium text-muted-foreground">{formatName(key)}</span>
-                  <div className={`p-1.5 rounded-full ${isNormal ? 'bg-green-100 text-green-600 dark:bg-green-900/30' : isHigh ? 'bg-orange-100 text-orange-600 dark:bg-orange-900/30' : isLow ? 'bg-red-100 text-red-600 dark:bg-red-900/30' : 'bg-muted text-muted-foreground'}`}>
-                    {isNormal ? <CheckCircle className="w-4 h-4" /> : isHigh ? <ArrowUpRight className="w-4 h-4" /> : isLow ? <ArrowDownRight className="w-4 h-4" /> : <HelpCircle className="w-4 h-4" />}
+                  <div className={`p-1.5 rounded-full ${
+                    isNormal ? 'bg-green-100 text-green-600 dark:bg-green-900/30' : 
+                    isHigh ? 'bg-orange-100 text-orange-600 dark:bg-orange-900/30' : 
+                    isLow ? 'bg-red-100 text-red-600 dark:bg-red-900/30' : 
+                    isAbnormal ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30' :
+                    'bg-muted text-muted-foreground'
+                  }`}>
+                    {isNormal ? <CheckCircle className="w-4 h-4" /> : 
+                     isHigh ? <ArrowUpRight className="w-4 h-4" /> : 
+                     isLow ? <ArrowDownRight className="w-4 h-4" /> : 
+                     isAbnormal ? <Activity className="w-4 h-4" /> :
+                     <HelpCircle className="w-4 h-4" />}
                   </div>
                 </div>
                 <div className="flex items-baseline gap-2 mb-2">
@@ -55,6 +75,27 @@ export default function MetricCards() {
                     {item?.value !== null && item?.value !== undefined ? item.value : '-'}
                   </span>
                   <span className="text-sm font-medium text-muted-foreground">{item?.unit || ''}</span>
+                  
+                  {/* Inline trend indicator from explanation */}
+                  {(() => {
+                    const exp = pInfo.explanation;
+                    const expText = (typeof exp === 'string' ? exp : (exp?.[language] || exp?.['en'] || '')).toLowerCase();
+                    if (expText.includes('improving') || expText.includes('better')) {
+                      return (
+                        <div className="flex items-center text-green-500 text-xs font-bold bg-green-500/10 px-1.5 py-0.5 rounded ml-1" title="Condition Improving">
+                          <TrendingUp className="w-3 h-3 mr-0.5" />
+                        </div>
+                      );
+                    }
+                    if (expText.includes('worsening') || expText.includes('higher than last') || expText.includes('lower than last')) {
+                      return (
+                        <div className="flex items-center text-red-500 text-xs font-bold bg-red-500/10 px-1.5 py-0.5 rounded ml-1" title="Condition Worsening">
+                          <TrendingDown className="w-3 h-3 mr-0.5" />
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
                 
                 {/* Visual representation of range */}

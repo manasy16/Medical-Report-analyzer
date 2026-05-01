@@ -93,6 +93,8 @@ REFERENCE_RANGES = {
 - Bilirubin        : Negative
 - Nitrite          : Negative
 - Leukocyte Esterase : Negative
+- Color            : Pale yellow to Amber
+- Appearance       : Clear or Transparent
 """,
     "unknown": "No specific reference ranges. Use general clinical knowledge."
 }
@@ -286,10 +288,12 @@ Rules:
 - Extract ALL parameters relevant to a {report_type} report that appear in the text
 - Return ONLY a valid JSON object — no explanation, no markdown fences
 - Each parameter must follow this format:
-  "parameter_name": {{"value": number or null, "unit": "unit string or null"}}
+  "parameter_name": {{"value": number or string or null, "unit": "unit string or null"}}
+- For quantitative values (like Hemoglobin), use numbers.
+- For qualitative values (like Urine Color, Appearance, or Presence of Protein like "3+"), use strings.
 - If a value is not present in the text, set value to null
 - Do NOT guess or invent values
-- Use snake_case for parameter names (e.g., "total_cholesterol", "hdl_cholesterol")
+- Use snake_case for parameter names (e.g., "total_cholesterol", "hdl_cholesterol", "urine_color")
 
 Return a flat JSON object with all found parameters.
 """)
@@ -331,9 +335,11 @@ def validation_node(state: State):
             continue
         value = param_data.get("value")
         if value is not None:
-            if not isinstance(value, (int, float)):
-                errors.append(f"{param_name} value is not a number: {value}")
-            elif value < 0:
+            # Check if it's a number or string
+            if not isinstance(value, (int, float, str)):
+                errors.append(f"{param_name} value is not a valid type (number or string): {value}")
+            # If it's a number, check for negative values
+            elif isinstance(value, (int, float)) and value < 0:
                 errors.append(f"{param_name} has an impossible negative value: {value}")
 
     if errors:
@@ -377,6 +383,8 @@ CRITICAL_THRESHOLDS = {
     "urine": [
         ("protein", "gt", 3),  # 3+ or higher
         ("ketones", "gt", 2),  # Large ketones
+        ("urine_color", "eq", "Red"),  # Hematuria hint
+        ("urine_color", "eq", "Brown"), # Potential liver/muscle issues
     ],
     "unknown": []
 }
@@ -392,14 +400,35 @@ def safety_gate_node(state: State):
         value = param.get("value") if isinstance(param, dict) else None
         if value is None:
             continue
-        if operator == "lt" and value < threshold:
-            logger.warning("[safety_gate] CRITICAL: %s = %s (< %s)", param_name, value, threshold)
-            is_critical = True
-            break
-        if operator == "gt" and value > threshold:
-            logger.warning("[safety_gate] CRITICAL: %s = %s (> %s)", param_name, value, threshold)
-            is_critical = True
-            break
+            
+        # Numeric checks
+        if isinstance(value, (int, float)) and isinstance(threshold, (int, float)):
+            if operator == "lt" and value < threshold:
+                logger.warning("[safety_gate] CRITICAL: %s = %s (< %s)", param_name, value, threshold)
+                is_critical = True
+                break
+            if operator == "gt" and value > threshold:
+                logger.warning("[safety_gate] CRITICAL: %s = %s (> %s)", param_name, value, threshold)
+                is_critical = True
+                break
+        
+        # String checks (equality)
+        elif isinstance(value, str) and operator == "eq":
+            if value.lower() == str(threshold).lower():
+                logger.warning("[safety_gate] CRITICAL: %s = %s (matches %s)", param_name, value, threshold)
+                is_critical = True
+                break
+        
+        # Special case: Qualitative "3+" or "4+" for protein/ketones
+        elif isinstance(value, str) and operator == "gt" and "+" in value:
+            try:
+                plus_count = value.count("+")
+                if plus_count >= threshold:
+                    logger.warning("[safety_gate] CRITICAL: %s = %s (>= %s+)", param_name, value, threshold)
+                    is_critical = True
+                    break
+            except:
+                pass
 
     return {"is_critical": is_critical}
 
@@ -487,7 +516,8 @@ Generate a response with these fields:
 - summary         : object with 3 keys ("en", "hi", "hinglish") containing 2–3 sentences. If history is available, the summary MUST mention the overall trend compared to previous reports (e.g., "Your hemoglobin is improving compared to last month").
 - risk_level      : one of — normal | borderline | mild | critical.
 - parameters      : an array of objects for each extracted parameter. Each object must have:
-    - parameter_name   : string
+    - parameter_name   : string (This MUST be the exact key used in the "Medical report values" JSON provided above, e.g., "total_cholesterol", not "Total Cholesterol").
+    - status           : one of — normal | high | low | abnormal. (Use "abnormal" for qualitative strings that are not "Normal", e.g., "Red" color or "Cloudy" appearance).
     - explanation      : object with 3 keys ("en", "hi", "hinglish") explaining:
         1. What this parameter is.
         2. What the current value means relative to the reference range.
