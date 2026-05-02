@@ -4,6 +4,7 @@ FROM python:3.10-slim
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
+ENV PYTHONPATH=/app/app
 
 # Install system dependencies for OCR and PDF processing
 # We also need libgl1 for some image processing libraries
