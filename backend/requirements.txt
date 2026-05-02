@@ -6,6 +6,9 @@ pdf2image
 langchain
 langgraph
 langchain-google-genai
+langchain-groq
+langchain-mistralai
+tenacity
 python-multipart
 python-dotenv
 sqlalchemy
