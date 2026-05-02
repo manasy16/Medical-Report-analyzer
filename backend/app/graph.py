@@ -104,7 +104,7 @@ REFERENCE_RANGES = {
 
 # Primary: Google AI Studio
 _gemini = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash-lite",
+    model="gemini-1.5-flash",
     temperature=0
 )
 
@@ -189,7 +189,7 @@ def ocr_node(state: State):
     print(f"[OCR] File size = {len(file_bytes)} bytes")
     text = ""
     try:
-        images = convert_from_bytes(file_bytes, poppler_path=POPPLER_PATH)
+        images = convert_from_bytes(file_bytes, poppler_path=POPPLER_PATH, dpi=150)
         print(f"[OCR] Pages converted: {len(images)}")
         for img in images:
             config = r"--oem 3 --psm 6"
@@ -742,7 +742,7 @@ builder.add_conditional_edges(
 
 # -- Non-critical path continues to analysis --
 builder.add_edge("confidence", "analyze")
-builder.add_edge("analyze",    "critic")
+builder.add_edge("analyze",    END)
 
 # -- After critic: pass / retry / end --
 builder.add_conditional_edges(
