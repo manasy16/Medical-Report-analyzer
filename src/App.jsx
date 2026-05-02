@@ -13,7 +13,6 @@ function App() {
   const { uploadStatus } = useAppStore();
   const [showApp, setShowApp] = React.useState(false);
 
-  // If already uploading or completed, we should definitely show the app
   const isActiveSession = uploadStatus !== 'idle' || showApp;
 
   return (

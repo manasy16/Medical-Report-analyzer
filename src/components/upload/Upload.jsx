@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Upload as UploadIcon, FileText, AlertCircle, TrendingUp, LogIn, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import useAppStore from '../../store/useAppStore';
-import { uploadReport, getReportResult } from '../../services/api';
+import { uploadReport } from '../../services/api';
 import MemberSelector from '../dashboard/MemberSelector';
 
 export default function Upload() {
@@ -25,6 +25,10 @@ export default function Upload() {
     user,
     selectedMemberId
   } = useAppStore();
+
+  // KEY FIX: ref guard prevents double-submission from fast double-clicks
+  // React state updates are async so button disabled prop alone isn't enough
+  const isSubmittingRef = useRef(false);
 
   const onDrop = useCallback((acceptedFiles) => {
     if (acceptedFiles?.length > 0) {
@@ -47,28 +51,33 @@ export default function Upload() {
 
   const handleUpload = async () => {
     if (!localFile) return;
+    if (isSubmittingRef.current) return;
 
+    isSubmittingRef.current = true;
     setError(null);
-    setUploadStatus('processing');
+    setUploadStatus('processing'); // Transition to processing screen
 
     try {
-      const data = await uploadReport(localFile, language, selectedMemberId);
-      const jobId = data.job_id;
-      setReportId(jobId);
-
-      const result = await getReportResult(jobId);
+      // POST /upload now returns the FULL result synchronously
+      const result = await uploadReport(localFile, language, selectedMemberId);
+      
       if (result.status === 'done') {
         setResultData(result);
         setUploadStatus('completed');
       } else {
         throw new Error(result.error || 'Analysis failed');
       }
+
     } catch (err) {
       console.error('Upload Error:', err);
       const msg = err.response?.data?.detail || err.message || t('error_upload', 'Upload failed. Please try again.');
       setError(typeof msg === 'string' ? msg : JSON.stringify(msg));
+      setUploadStatus('error');
+      isSubmittingRef.current = false;
     }
   };
+
+  const isProcessing = uploadStatus === 'uploading' || uploadStatus === 'processing';
 
   return (
     <div className="w-full max-w-3xl mx-auto mt-4 animate-in fade-in zoom-in duration-500">
@@ -76,7 +85,9 @@ export default function Upload() {
         <h1 className="text-4xl font-bold tracking-tight mb-2 text-foreground">
           {t('upload_title', 'Analyze Your Medical Report')}
         </h1>
-        <p className="text-muted-foreground text-lg">{t('upload_subtitle', 'Instant AI-powered insights for your family health.')}</p>
+        <p className="text-muted-foreground text-lg">
+          {t('upload_subtitle', 'Instant AI-powered insights for your family health.')}
+        </p>
       </div>
 
       <MemberSelector />
@@ -89,7 +100,9 @@ export default function Upload() {
             </div>
             <div className="text-left">
               <p className="font-medium text-sm">Save & Track History</p>
-              <p className="text-xs text-muted-foreground">Sign in to track health trends over time for your whole family.</p>
+              <p className="text-xs text-muted-foreground">
+                Sign in to track health trends over time for your whole family.
+              </p>
             </div>
           </div>
           <Button variant="outline" size="sm" onClick={() => navigate('/login')} className="shrink-0 gap-2">
@@ -131,23 +144,28 @@ export default function Upload() {
                   </div>
                   <div className="flex-1 min-w-0 text-left">
                     <p className="text-sm font-semibold truncate">{localFile.name}</p>
-                    <p className="text-xs text-muted-foreground">{(localFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                    <p className="text-xs text-muted-foreground">
+                      {(localFile.size / 1024 / 1024).toFixed(2)} MB
+                    </p>
                   </div>
                 </div>
 
                 <div className="flex gap-4 w-full max-w-md">
-                  <Button variant="outline" className="flex-1" onClick={(e) => { e.stopPropagation(); setFile(null); }}>
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={(e) => { e.stopPropagation(); setFile(null); }}
+                    disabled={isProcessing}
+                  >
                     Cancel
                   </Button>
                   <Button
                     onClick={(e) => { e.stopPropagation(); handleUpload(); }}
-                    disabled={uploadStatus === 'processing'}
+                    disabled={isProcessing}
                     className="flex-1 shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/30 transition-all gap-2"
                   >
-                    {uploadStatus === 'processing' ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" /> Analyzing...
-                      </>
+                    {isProcessing ? (
+                      <><Loader2 className="w-4 h-4 animate-spin" /> Uploading...</>
                     ) : (
                       'Analyze Report'
                     )}
