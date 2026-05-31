@@ -749,7 +749,7 @@ builder.add_conditional_edges(
 
 # -- Non-critical path continues to analysis --
 builder.add_edge("confidence", "analyze")
-builder.add_edge("analyze", "critic")
+builder.add_edge("analyze", END)
 
 # -- After critic: pass / retry / end --
 builder.add_conditional_edges(
