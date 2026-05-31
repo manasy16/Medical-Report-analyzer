@@ -19,8 +19,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from langchain_core.prompts import ChatPromptTemplate
 
 # -- Tool Paths --
-os.environ["POPPLER_PATH"]   = "C:/poppler-25.12.0/Library/bin"
-os.environ["TESSERACT_PATH"] = "C:/Program Files/Tesseract-OCR/tesseract.exe"
+
 
 import pytesseract
 from PIL import Image
@@ -742,7 +741,7 @@ builder.add_conditional_edges(
 
 # -- Non-critical path continues to analysis --
 builder.add_edge("confidence", "analyze")
-builder.add_edge("analyze",    END)
+builder.add_edge("analyze", "critic")
 
 # -- After critic: pass / retry / end --
 builder.add_conditional_edges(

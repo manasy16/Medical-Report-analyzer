@@ -6,10 +6,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Secret key for JWT
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-for-development")
+# Secret key for JWT — MUST be set in environment variables
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError(
+        "SECRET_KEY environment variable is not set. "
+        "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+    )
+
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 1 week
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 1 week
 
 import bcrypt
 
