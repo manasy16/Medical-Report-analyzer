@@ -103,7 +103,7 @@ REFERENCE_RANGES = {
 
 # Primary: Google AI Studio
 _gemini = ChatGoogleGenerativeAI(
-    model="gemini-1.5-flash",
+    model="gemini-2.0-flash",
     temperature=0
 )
 
@@ -163,12 +163,18 @@ def parse_llm_json(raw: str, node_name: str) -> Optional[dict]:
     """
     Safely parse JSON from LLM response.
     Strips ```json ... ``` fences if present.
+    Handles invalid Unicode escape sequences from non-Gemini models.
     Returns None on failure (caller must handle it).
     """
     try:
         text = raw.strip()
         # Remove markdown fences like ```json ... ```
         text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.MULTILINE).strip()
+        
+        # Fix invalid escape sequences produced by Groq/Mistral
+        # e.g. \व becomes \\व so json.loads doesn't choke
+        text = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
+        
         result = json.loads(text)
         if not isinstance(result, dict):
             raise ValueError("Expected a JSON object (dict)")
@@ -176,7 +182,6 @@ def parse_llm_json(raw: str, node_name: str) -> Optional[dict]:
     except (json.JSONDecodeError, ValueError) as e:
         logger.error("[%s] JSON parse failed: %s | Raw output: %.200s", node_name, e, raw)
         return None
-
 
 # ============================================================
 # NODE 1 — OCR
@@ -529,6 +534,8 @@ Rules:
 - Never use alarming language.
 - If risk_level is critical or mild, set diet_suggestions to [].
 - Return ONLY a valid JSON object, no markdown fences.
+- - For Hindi (hi) and Hinglish text, write the text directly in Unicode characters. Do NOT use escape sequences like \n or \t inside string values.                                             
+                                              
 """)
 
     chain = prompt | llm
@@ -623,7 +630,8 @@ Problems to fix:
 Rules:
 - Fix ONLY the listed problems — do not change anything else
 - Keep the same JSON structure
-- Return ONLY a valid JSON object, no markdown fences
+- Return ONLY a valid JSON object, no markdown fences.
+- - Write Hindi text directly in Unicode. Do NOT use backslash escape sequences inside string values.
 """)
 
     chain = prompt | llm
