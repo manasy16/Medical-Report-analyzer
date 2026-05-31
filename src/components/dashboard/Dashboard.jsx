@@ -35,10 +35,12 @@ export default function Dashboard() {
 
     const summary = typeof resultData.summary === 'string' 
       ? resultData.summary 
-      : (resultData.summary[language] || resultData.summary['en'] || '');
+      : (resultData.summary?.[language] || resultData.summary?.['en'] || '');
 
-    const parameters = resultData.parameters || [];
-    const extractedValues = resultData.extracted_values || {};
+    const parameters = Array.isArray(resultData.parameters) ? resultData.parameters : [];
+    const extractedValues = resultData.extracted_values && typeof resultData.extracted_values === 'object'
+      ? resultData.extracted_values
+      : {};
 
     const printWindow = window.open('', '_blank');
     printWindow.document.write(`

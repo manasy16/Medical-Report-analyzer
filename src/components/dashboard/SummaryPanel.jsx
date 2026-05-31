@@ -15,10 +15,12 @@ export default function SummaryPanel() {
     if (!resultData) return;
     const summary = typeof resultData.summary === 'string' 
       ? resultData.summary 
-      : (resultData.summary[language] || resultData.summary['en'] || '');
+      : (resultData.summary?.[language] || resultData.summary?.['en'] || '');
 
-    const parameters = resultData.parameters || [];
-    const extractedValues = resultData.extracted_values || {};
+    const parameters = Array.isArray(resultData.parameters) ? resultData.parameters : [];
+    const extractedValues = resultData.extracted_values && typeof resultData.extracted_values === 'object'
+      ? resultData.extracted_values
+      : {};
 
     let content = `MEDICAL REPORT ANALYSIS\n`;
     content += `======================\n\n`;
@@ -57,7 +59,7 @@ export default function SummaryPanel() {
 
   let summaryText = typeof resultData.summary === 'string' 
     ? resultData.summary 
-    : (resultData.summary[language] || resultData.summary['en'] || '');
+    : (resultData.summary?.[language] || resultData.summary?.['en'] || '');
 
   // Simulate technical vs simple view by appending context if technical
   const displayText = isSimple 

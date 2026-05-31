@@ -10,8 +10,10 @@ export default function MetricCards() {
 
   if (!resultData?.extracted_values) return null;
 
-  const parameters = resultData?.parameters || [];
-  const extractedValues = resultData?.extracted_values || {};
+  const parameters = Array.isArray(resultData?.parameters) ? resultData.parameters : [];
+  const extractedValues = resultData?.extracted_values && typeof resultData.extracted_values === 'object'
+    ? resultData.extracted_values
+    : {};
 
   if (parameters.length === 0) {
     return (

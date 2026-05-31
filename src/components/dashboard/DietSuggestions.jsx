@@ -14,7 +14,9 @@ export default function DietSuggestions() {
   if (isCritical) return null;
 
   const rawSuggestions = resultData?.diet_suggestions;
-  const suggestions = rawSuggestions?.[language] || [];
+  const suggestions = rawSuggestions && typeof rawSuggestions === 'object' && !Array.isArray(rawSuggestions)
+    ? rawSuggestions[language] || []
+    : Array.isArray(rawSuggestions) ? rawSuggestions : [];
 
   if (!suggestions || suggestions.length === 0) return null;
 
