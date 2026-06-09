@@ -105,6 +105,7 @@ REFERENCE_RANGES = {
 _groq = ChatGroq(
     model="llama-3.3-70b-versatile",
     temperature=0,
+    max_tokens=4096,
     api_key=os.getenv("GROQ_API_KEY")
 )
 
@@ -168,8 +169,9 @@ def parse_llm_json(raw: str, node_name: str) -> Optional[dict]:
     """
     try:
         text = raw.strip()
-        # Remove markdown fences like ```json ... ```
-        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.MULTILINE).strip()
+        # Remove markdown fences — handles both complete and truncated responses
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
+        text = re.sub(r"\s*```$", "", text, flags=re.MULTILINE).strip()
         
         # Fix invalid escape sequences produced by Groq/Mistral
         # e.g. \व becomes \\व so json.loads doesn't choke
