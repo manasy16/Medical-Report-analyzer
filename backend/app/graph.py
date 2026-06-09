@@ -226,98 +226,106 @@ def cleaner_node(state: State):
 
 
 # ============================================================
-# NODE 2b — REPORT TYPE DETECTOR
+# NODE 2b — DETECT TYPE + EXTRACT (merged, single LLM call)
 # ============================================================
 
-def report_type_detector_node(state: State):
+VALID_REPORT_TYPES = {"cbc", "lipid", "thyroid", "liver", "kidney", "diabetes", "urine", "unknown"}
+
+def detect_and_extract_node(state: State):
     """
-    Reads the cleaned text and identifies what kind of medical
-    report it is. This tells every downstream node what to do.
+    Replaces the old report_type_detector_node + extraction_node.
+    One single LLM call that:
+      1. Identifies the report type
+      2. Extracts ALL parameters present in the text
+
+    Returns both report_type and extracted_data in one shot,
+    saving one full Groq round trip (~10-15 seconds).
+
+    Output JSON shape:
+    {
+      "report_type": "cbc",
+      "parameters": {
+        "hemoglobin": {"value": 12.5, "unit": "g/dL"},
+        "pcv":        {"value": 57.5, "unit": "%"},
+        ...
+      }
+    }
     """
     prompt = ChatPromptTemplate.from_template("""
-You are a medical document classifier. Read the text below and identify 
-what type of medical report it is.
+You are a medical document parser. Read the report text below and do TWO things in one response.
 
 Text:
 {input}
 
-Choose EXACTLY one of these report types:
-- "cbc"      → Complete Blood Count (hemoglobin, WBC, RBC, platelets)
+TASK 1 — Identify the report type.
+Choose EXACTLY one of:
+- "cbc"      → Complete Blood Count (hemoglobin, WBC, RBC, platelets, PCV, MCV, MCH, MCHC, RDW, differentials)
 - "lipid"    → Lipid Panel (cholesterol, LDL, HDL, triglycerides)
-- "thyroid"  → Thyroid Function (TSH, T3, T4)
-- "liver"    → Liver Function Tests (ALT, AST, bilirubin, albumin)
-- "kidney"   → Kidney / Renal Function (creatinine, BUN, eGFR)
-- "diabetes" → Diabetes / Blood Sugar (HbA1c, glucose)
-- "urine"    → Urine Analysis (pH, protein, glucose, specific gravity)
+- "thyroid"  → Thyroid Function (TSH, T3, T4, FT3, FT4)
+- "liver"    → Liver Function Tests (ALT, AST, bilirubin, albumin, ALP)
+- "kidney"   → Kidney / Renal Function (creatinine, BUN, eGFR, uric acid)
+- "diabetes" → Diabetes / Blood Sugar (HbA1c, fasting glucose, post-prandial glucose)
+- "urine"    → Urine Analysis (pH, protein, glucose, specific gravity, color, appearance, nitrite, ketones, bilirubin, leukocyte esterase)
 - "unknown"  → Cannot determine
 
+TASK 2 — Extract EVERY parameter that appears in the text.
+Rules for extraction:
+- Extract ALL parameters present — do not skip any, even if they appear normal
+- For quantitative values (numbers), use a JSON number type
+- For qualitative values (like urine color, appearance, or "3+" protein), use a string
+- If a value is missing from the text, set value to null
+- Do NOT invent or guess values
+- Use snake_case for parameter names (e.g., "total_cholesterol", "pcv", "urine_color")
+
 Return ONLY a valid JSON object, no explanation, no markdown fences:
-{{"report_type": "one of the above strings"}}
+{{
+  "report_type": "one of the types above",
+  "parameters": {{
+    "parameter_name": {{"value": number or string or null, "unit": "unit string or null"}},
+    "parameter_name": {{"value": number or string or null, "unit": "unit string or null"}}
+  }}
+}}
 """)
 
     chain = prompt | llm
     response = call_llm_with_retry(chain, {"input": state["cleaned_text"]})
 
-    result = parse_llm_json(response.content, "report_type_detector")
+    result = parse_llm_json(response.content, "detect_and_extract_node")
 
-    if result is None or result.get("report_type") not in [
-        "cbc", "lipid", "thyroid", "liver", "kidney", "diabetes", "urine", "unknown"
-    ]:
-        logger.warning("[report_type_detector] Could not determine type — defaulting to unknown")
-        return {"report_type": "unknown"}
-
-    logger.info("[report_type_detector] Detected: %s", result["report_type"])
-    return {"report_type": result["report_type"]}
-
-
-# ============================================================
-# NODE 3 — STRUCTURED EXTRACTION (LLM)
-# ============================================================
-
-def extraction_node(state: State):
-    """
-    Dynamically extracts parameters based on the detected report type.
-    The LLM knows what to look for because we tell it the report type.
-    """
-    report_type = state.get("report_type", "unknown")
-
-    prompt = ChatPromptTemplate.from_template("""
-Extract medical values from the text below.
-This is a {report_type} report.
-
-Text:
-{input}
-
-Rules:
-- Extract ALL parameters relevant to a {report_type} report that appear in the text
-- Return ONLY a valid JSON object — no explanation, no markdown fences
-- Each parameter must follow this format:
-  "parameter_name": {{"value": number or string or null, "unit": "unit string or null"}}
-- For quantitative values (like Hemoglobin), use numbers.
-- For qualitative values (like Urine Color, Appearance, or Presence of Protein like "3+"), use strings.
-- If a value is not present in the text, set value to null
-- Do NOT guess or invent values
-- Use snake_case for parameter names (e.g., "total_cholesterol", "hdl_cholesterol", "urine_color")
-
-Return a flat JSON object with all found parameters.
-""")
-
-    chain = prompt | llm
-    response = call_llm_with_retry(chain, {
-        "input": state["cleaned_text"],
-        "report_type": report_type
-    })
-
-    data = parse_llm_json(response.content, "extraction_node")
-
-    if data is None:
+    # ── Parse failure → flag it, downstream will route to report_failure
+    if result is None:
+        logger.error("[detect_and_extract_node] LLM returned unparseable JSON")
         return {
-            "extracted_data"   : {},
+            "report_type"     : "unknown",
+            "extracted_data"  : {},
             "extraction_failed": True
         }
 
+    # ── Validate report_type — default to unknown if LLM hallucinated
+    report_type = result.get("report_type", "unknown")
+    if report_type not in VALID_REPORT_TYPES:
+        logger.warning("[detect_and_extract_node] Invalid report_type '%s' — defaulting to unknown", report_type)
+        report_type = "unknown"
+
+    # ── Extract the parameters dict — default to empty if missing
+    parameters = result.get("parameters", {})
+    if not isinstance(parameters, dict):
+        logger.warning("[detect_and_extract_node] 'parameters' is not a dict — treating as empty")
+        parameters = {}
+
+    # ── If we got a type but zero params, still flag as failed
+    if not parameters:
+        logger.warning("[detect_and_extract_node] No parameters extracted")
+        return {
+            "report_type"     : report_type,
+            "extracted_data"  : {},
+            "extraction_failed": True
+        }
+
+    logger.info("[detect_and_extract_node] type=%s | params=%d", report_type, len(parameters))
     return {
-        "extracted_data"   : data,
+        "report_type"     : report_type,
+        "extracted_data"  : parameters,
         "extraction_failed": False
     }
 
@@ -500,42 +508,67 @@ def report_failure_node(state: State):
 def analyzer_node(state: State):
     """
     Generates summary + risk level + diet suggestions.
+    Improved:
+    - Summary now names every abnormal parameter with its actual value
+    - Parameters array is forced to cover ALL extracted keys, not just "important" ones
     """
     prompt = ChatPromptTemplate.from_template("""
-You are a calm, helpful medical assistant.
+You are a calm, helpful medical assistant. Your job is to explain a medical report
+to a patient in simple, friendly language. Never use scary or alarming words.
+Never suggest any medication, drug, or supplement — only natural diet and lifestyle advice.
 
-Medical report values:
+Medical report values (you received these from the report):
 {data}
 
-Standard reference ranges:
+Standard reference ranges for this report type:
 {ranges}
 
 {history_context}
 
 Task:
-Analyze the current report values. If history context is provided, you MUST perform a trend analysis for EACH parameter.
-Compare the current values with the previous ones and mention in the explanation if they are improving, worsening, or stable.
+Analyze the report values above and generate a response with these exact fields:
 
-Generate a response with these fields:
-- summary         : object with 3 keys ("en", "hi", "hinglish") containing 2–3 sentences. If history is available, the summary MUST mention the overall trend compared to previous reports (e.g., "Your hemoglobin is improving compared to last month").
-- risk_level      : one of — normal | borderline | mild | critical.
-- parameters      : an array of objects for each extracted parameter. Each object must have:
-    - parameter_name   : string (This MUST be the exact key used in the "Medical report values" JSON provided above, e.g., "total_cholesterol", not "Total Cholesterol").
-    - status           : one of — normal | high | low | abnormal. (Use "abnormal" for qualitative strings that are not "Normal", e.g., "Red" color or "Cloudy" appearance).
-    - explanation      : object with 3 keys ("en", "hi", "hinglish") explaining:
-        1. What this parameter is.
-        2. What the current value means relative to the reference range.
-        3. A personalized trend comparison if history for this parameter is available (e.g., "This is higher than your last report on 2024-01-10").
-    - nutrition_guide  : object with 3 keys ("en", "hi", "hinglish") detailing specific diet or lifestyle advice to improve this specific parameter.
-- diet_suggestions: object with 3 keys ("en", "hi", "hinglish"), each being a list of general safe suggestions.
+1. summary
+   An object with 3 keys: "en", "hi", "hinglish".
+   Each must be 2-3 calm, friendly sentences.
+   IMPORTANT: The summary MUST specifically mention every parameter that is outside
+   its normal range — by name, with its actual value, and whether it is high or low.
+   Example of a good summary: "Your PCV is slightly high at 57.5% and your Hemoglobin
+   is slightly below the normal range at 12.5 g/dL. Your WBC, RBC, and Platelets are
+   all within normal limits. Overall your report looks mostly normal with a couple of
+   values worth keeping an eye on."
+   If history is available, also mention the overall trend (improving/worsening/stable).
+
+2. risk_level
+   One of: normal | borderline | mild | critical
+
+3. parameters
+   An array of parameter objects.
+   *** CRITICAL RULE: You MUST include one object for EVERY single key present in the
+   "Medical report values" JSON above. Do NOT skip any parameter, even if its value
+   is normal. If the report has 14 parameters, this array must have 14 objects. ***
+   Each object must have:
+   - parameter_name : the exact snake_case key from the report values JSON
+   - status         : one of — normal | high | low | abnormal
+                      (use "abnormal" for qualitative values that are not normal,
+                       e.g. "Red" urine color or "Cloudy" appearance)
+   - explanation    : object with keys "en", "hi", "hinglish" — explain in simple words:
+                      (a) what this parameter measures
+                      (b) what the patient's value means vs the reference range
+                      (c) if history is available, mention the trend for this parameter
+   - nutrition_guide: object with keys "en", "hi", "hinglish" — give specific, natural
+                      diet or lifestyle tips to help this parameter. No medications.
+
+4. diet_suggestions
+   Object with keys "en", "hi", "hinglish", each a list of general safe dietary tips.
+   Set all three to empty lists [] if risk_level is critical or mild.
 
 Rules:
-- Provide all translations for "en", "hi", and "hinglish".
-- Never use alarming language.
-- If risk_level is critical or mild, set diet_suggestions to [].
-- Return ONLY a valid JSON object, no markdown fences.
-- - For Hindi (hi) and Hinglish text, write the text directly in Unicode characters. Do NOT use escape sequences like \n or \t inside string values.                                             
-                                              
+- Write all translations for "en", "hi", and "hinglish" in every field.
+- Never use alarming, scary, or medical-jargon-heavy language.
+- Never suggest any medication, pill, or supplement.
+- For Hindi and Hinglish text, write directly in Unicode — no backslash escape sequences.
+- Return ONLY a valid JSON object. No markdown fences, no explanation outside the JSON.
 """)
 
     chain = prompt | llm
@@ -705,27 +738,25 @@ def route_after_critic(state: State) -> str:
 builder = StateGraph(State)
 
 # -- Register all nodes --
-builder.add_node("ocr",            ocr_node)
-builder.add_node("clean",          cleaner_node)
-builder.add_node("detect_type",    report_type_detector_node)
-builder.add_node("extract",        extraction_node)
-builder.add_node("validate",       validation_node)
-builder.add_node("safety_gate",    safety_gate_node)
-builder.add_node("confidence",     confidence_node)
-builder.add_node("blocked",        blocked_node)
-builder.add_node("report_failure", report_failure_node)
-builder.add_node("analyze",        analyzer_node)
-builder.add_node("critic",         critic_node)
-builder.add_node("fix",            fix_node)
+builder.add_node("ocr",                 ocr_node)
+builder.add_node("clean",               cleaner_node)
+builder.add_node("detect_and_extract",  detect_and_extract_node)   # merged node
+builder.add_node("validate",            validation_node)
+builder.add_node("safety_gate",         safety_gate_node)
+builder.add_node("confidence",          confidence_node)
+builder.add_node("blocked",             blocked_node)
+builder.add_node("report_failure",      report_failure_node)
+builder.add_node("analyze",             analyzer_node)
+builder.add_node("critic",              critic_node)
+builder.add_node("fix",                 fix_node)
 
 # -- Entry point --
 builder.set_entry_point("ocr")
 
 # -- Linear edges --
-builder.add_edge("ocr",         "clean")
-builder.add_edge("clean",       "detect_type")
-builder.add_edge("detect_type", "extract")
-builder.add_edge("extract",     "validate")
+builder.add_edge("ocr",                "clean")
+builder.add_edge("clean",              "detect_and_extract")   # was: clean→detect_type→extract
+builder.add_edge("detect_and_extract", "validate")
 
 # -- After validation: route based on extraction success --
 builder.add_conditional_edges(
