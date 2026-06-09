@@ -6,21 +6,6 @@ from auth.deps import get_current_user
 
 router = APIRouter(prefix="/trends", tags=["trends"])
 
-def normalize_param_name(value: str) -> str:
-    return (value or "").strip().lower().replace(" ", "_").replace("-", "_")
-
-
-def to_number(value):
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value.replace(",", "").strip())
-        except ValueError:
-            return None
-    return None
-
-
 @router.get("/")
 def get_trends(member_id: int, param: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     # Verify member belongs to user
@@ -28,53 +13,36 @@ def get_trends(member_id: int, param: str, current_user: User = Depends(get_curr
     if not member:
         raise HTTPException(status_code=403, detail="Member does not belong to user")
 
-    # Fetch latest 10 reports, then chart them oldest -> newest.
-    reports = (
-        db.query(Report)
-        .filter(Report.member_id == member_id)
-        .order_by(Report.created_at.desc())
-        .limit(10)
-        .all()
-    )
-    reports = list(reversed(reports))
+    # Fetch last 10 reports
+    reports = db.query(Report).filter(Report.member_id == member_id).order_by(Report.created_at.asc()).limit(10).all()
     
     trend_data = []
-    requested_param = normalize_param_name(param)
     for report in reports:
         parsed = report.parsed_json or {}
+        # The structure from previous task: extracted_values contains { value, unit, status }
         extracted = parsed.get("extracted_values", {})
-        normalized = {
-            normalize_param_name(key): value
-            for key, value in extracted.items()
-            if isinstance(value, dict)
-        }
-        param_data = normalized.get(requested_param)
+        param_data = extracted.get(param.lower())
         
         if param_data and param_data.get("value") is not None:
-            numeric_value = to_number(param_data.get("value"))
-            if numeric_value is None:
-                continue
             trend_data.append({
                 "date": report.created_at.strftime("%Y-%m-%d"),
-                "value": numeric_value,
+                "value": param_data.get("value"),
                 "unit": param_data.get("unit", "")
             })
 
-    insight = "Not enough data"
+    # Basic trend logic
+    insight = "Stable"
     if len(trend_data) >= 2:
         first = trend_data[0]["value"]
         last = trend_data[-1]["value"]
         diff = last - first
-        tolerance = max(abs(first) * 0.03, 0.1)
-        if diff > tolerance:
+        if diff > 0.1:
             insight = "Increasing"
-        elif diff < -tolerance:
+        elif diff < -0.1:
             insight = "Decreasing"
-        else:
-            insight = "Stable"
 
     return {
-        "parameter": requested_param,
+        "parameter": param,
         "trend": trend_data,
         "insight": insight
     }

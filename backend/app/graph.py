@@ -9,7 +9,7 @@ import re
 import json
 import logging
 import io
-from typing import TypedDict, Optional, Any
+from typing import TypedDict, Optional
 
 from langgraph.graph import StateGraph, END
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -26,10 +26,6 @@ from PIL import Image
 from pdf2image import convert_from_bytes
 from dotenv import load_dotenv
 from pathlib import Path
-try:
-    from pypdf import PdfReader
-except ImportError:  # pragma: no cover - available in Docker via requirements.txt
-    PdfReader = None
 
 # ── Load .env ────────────────────────────────────────────────
 env_path = Path(__file__).parent / ".env"
@@ -107,32 +103,31 @@ REFERENCE_RANGES = {
 
 # Primary: Google AI Studio
 _gemini = ChatGoogleGenerativeAI(
-    model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
-    temperature=0,
-    google_api_key=os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    model="gemini-2.0-flash",
+    temperature=0
 )
 
 # Fallback 1: Groq (Llama 3.3 70B) — completely different server
 _groq = ChatGroq(
-    model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+    model="llama-3.3-70b-versatile",
     temperature=0,
     api_key=os.getenv("GROQ_API_KEY")
 )
 
 # Fallback 2: Mistral AI — third independent server
 _mistral = ChatMistralAI(
-    model=os.getenv("MISTRAL_MODEL", "mistral-small-latest"),
+    model="mistral-small-latest",
     temperature=0,
     api_key=os.getenv("MISTRAL_API_KEY")
 )
 
 # Chain them — if Gemini fails, tries Groq, then Mistral
-llm = _groq.with_fallbacks([_mistral, _gemini])
+llm = _gemini.with_fallbacks([_groq, _mistral])
 
 # ── Retry wrapper — handles temporary 503 spikes ─────────────
 @retry(
     wait=wait_exponential(multiplier=1, min=1, max=5),
-    stop=stop_after_attempt(2),
+    stop=stop_after_attempt(4),
     reraise=True
 )
 def call_llm_with_retry(chain, inputs: dict):
@@ -192,136 +187,13 @@ def parse_llm_json(raw: str, node_name: str) -> Optional[dict]:
 # NODE 1 — OCR
 # ============================================================
 
-def extract_pdf_text(file_bytes: bytes, max_pages: int = 4) -> str:
-    """Fast path for text-based PDFs; avoids expensive OCR when possible."""
-    if PdfReader is None or not file_bytes.startswith(b"%PDF"):
-        return ""
-
-    try:
-        reader = PdfReader(io.BytesIO(file_bytes))
-        pages = reader.pages[:max_pages]
-        text = "\n".join((page.extract_text() or "") for page in pages)
-        return text.strip()
-    except Exception as e:
-        logger.info("[OCR] PDF text extraction skipped: %s", e)
-        return ""
-
-
-def looks_like_medical_text(text: str) -> bool:
-    if len(text) < 80:
-        return False
-    return bool(re.search(
-        r"\b(hemoglobin|wbc|rbc|platelet|cholesterol|triglyceride|tsh|glucose|hba1c|creatinine|bilirubin|protein)\b",
-        text,
-        flags=re.IGNORECASE,
-    ))
-
-
-REPORT_TYPE_KEYWORDS = {
-    "cbc": ["hemoglobin", "haemoglobin", "wbc", "rbc", "platelet", "packed cell", "mcv", "mch"],
-    "lipid": ["cholesterol", "ldl", "hdl", "triglyceride", "vldl"],
-    "thyroid": ["tsh", "thyroid", "t3", "t4", "ft3", "ft4"],
-    "liver": ["sgpt", "sgot", "alt", "ast", "bilirubin", "albumin", "alkaline phosphatase"],
-    "kidney": ["creatinine", "urea", "bun", "egfr", "uric acid"],
-    "diabetes": ["hba1c", "glucose", "fasting blood sugar", "post prandial", "ppbs"],
-    "urine": ["urine", "specific gravity", "leukocyte", "nitrite", "ketone"],
-}
-
-
-def detect_report_type_locally(text: str) -> str:
-    lower = text.lower()
-    scores = {
-        report_type: sum(1 for keyword in keywords if keyword in lower)
-        for report_type, keywords in REPORT_TYPE_KEYWORDS.items()
-    }
-    best_type, best_score = max(scores.items(), key=lambda item: item[1])
-    return best_type if best_score else "unknown"
-
-
-PARAMETER_PATTERNS = {
-    "cbc": {
-        "hemoglobin": [r"(?:ha?emoglobin|hb)\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-        "rbc": [r"\brbc(?:\s*count)?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-        "wbc": [r"\bwbc(?:\s*count)?\s*[:\-]?\s*([0-9,]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-        "platelets": [r"\bplatelets?(?:\s*count)?\s*[:\-]?\s*([0-9,]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-    },
-    "lipid": {
-        "total_cholesterol": [r"total\s+cholesterol\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-        "ldl_cholesterol": [r"\bldl(?:\s+cholesterol)?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-        "hdl_cholesterol": [r"\bhdl(?:\s+cholesterol)?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-        "triglycerides": [r"\btriglycerides?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-    },
-    "thyroid": {
-        "tsh": [r"\btsh\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-        "t3": [r"\bt3\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-        "t4": [r"\bt4\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-        "ft3": [r"\bft3\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-        "ft4": [r"\bft4\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-    },
-    "liver": {
-        "alt": [r"\b(?:alt|sgpt)\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-        "ast": [r"\b(?:ast|sgot)\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-        "bilirubin": [r"\bbilirubin\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-        "albumin": [r"\balbumin\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-    },
-    "kidney": {
-        "creatinine": [r"\bcreatinine\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-        "bun": [r"\b(?:bun|urea)\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-        "egfr": [r"\begfr\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ/.0-9]+)?"],
-        "uric_acid": [r"\buric\s+acid\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-    },
-    "diabetes": {
-        "fasting_blood_glucose": [r"(?:fasting\s+(?:blood\s+)?(?:glucose|sugar)|fbs)\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-        "post_prandial_glucose": [r"(?:post[-\s]?prandial|ppbs|pp)\s*(?:blood\s+)?(?:glucose|sugar)?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%µμ]+)?"],
-        "hba1c": [r"\bhba1c\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(%|[a-zA-Z/%µμ]+)?"],
-    },
-}
-
-
-def normalize_number(value: str) -> Any:
-    cleaned = value.replace(",", "")
-    try:
-        number = float(cleaned)
-        return int(number) if number.is_integer() else number
-    except ValueError:
-        return value
-
-
-def extract_values_locally(text: str, report_type: str) -> dict:
-    extracted = {}
-    patterns = PARAMETER_PATTERNS.get(report_type, {})
-    for param_name, param_patterns in patterns.items():
-        for pattern in param_patterns:
-            match = re.search(pattern, text, flags=re.IGNORECASE)
-            if match:
-                extracted[param_name] = {
-                    "value": normalize_number(match.group(1)),
-                    "unit": (match.group(2) or "").strip() or None,
-                }
-                break
-    return extracted
-
-
 def ocr_node(state: State):
     file_bytes = state["file"]
     print(f"[OCR] POPPLER_PATH = {POPPLER_PATH}")
     print(f"[OCR] File size = {len(file_bytes)} bytes")
     text = ""
-    pdf_text = extract_pdf_text(file_bytes)
-    if looks_like_medical_text(pdf_text):
-        print(f"[OCR] Used embedded PDF text: {len(pdf_text)} chars")
-        return {"raw_text": pdf_text}
-
     try:
-        images = convert_from_bytes(
-            file_bytes,
-            poppler_path=POPPLER_PATH,
-            dpi=int(os.getenv("OCR_DPI", "120")),
-            first_page=1,
-            last_page=int(os.getenv("OCR_MAX_PAGES", "4")),
-            grayscale=True,
-            thread_count=2,
-        )
+        images = convert_from_bytes(file_bytes, poppler_path=POPPLER_PATH, dpi=150)
         print(f"[OCR] Pages converted: {len(images)}")
         for img in images:
             config = r"--oem 3 --psm 6"
@@ -362,11 +234,6 @@ def report_type_detector_node(state: State):
     Reads the cleaned text and identifies what kind of medical
     report it is. This tells every downstream node what to do.
     """
-    local_type = detect_report_type_locally(state["cleaned_text"])
-    if local_type != "unknown":
-        logger.info("[report_type_detector] Local detection: %s", local_type)
-        return {"report_type": local_type}
-
     prompt = ChatPromptTemplate.from_template("""
 You are a medical document classifier. Read the text below and identify 
 what type of medical report it is.
@@ -413,13 +280,6 @@ def extraction_node(state: State):
     The LLM knows what to look for because we tell it the report type.
     """
     report_type = state.get("report_type", "unknown")
-    local_data = extract_values_locally(state["cleaned_text"], report_type)
-    if local_data:
-        logger.info("[extraction_node] Local extraction found %s values", len(local_data))
-        return {
-            "extracted_data": local_data,
-            "extraction_failed": False
-        }
 
     prompt = ChatPromptTemplate.from_template("""
 Extract medical values from the text below.
@@ -842,14 +702,6 @@ def route_after_critic(state: State) -> str:
 # BUILD LANGGRAPH
 # ============================================================
 
-def route_after_analyze(state: State) -> str:
-    """
-    Critic/fix costs at least one extra LLM call. Keep uploads fast by default,
-    but allow strict review with ENABLE_LLM_CRITIC=true.
-    """
-    return "critic" if os.getenv("ENABLE_LLM_CRITIC", "false").lower() == "true" else "end"
-
-
 builder = StateGraph(State)
 
 # -- Register all nodes --
@@ -897,14 +749,7 @@ builder.add_conditional_edges(
 
 # -- Non-critical path continues to analysis --
 builder.add_edge("confidence", "analyze")
-builder.add_conditional_edges(
-    "analyze",
-    route_after_analyze,
-    {
-        "critic": "critic",
-        "end": END
-    }
-)
+builder.add_edge("analyze", END)
 
 # -- After critic: pass / retry / end --
 builder.add_conditional_edges(
@@ -926,6 +771,8 @@ builder.add_edge("report_failure", END)
 
 # -- Compile --
 graph = builder.compile()
+
+print(graph)
 
 
 # ============================================================

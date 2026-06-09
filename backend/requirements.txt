@@ -3,7 +3,6 @@ uvicorn
 pytesseract
 pillow
 pdf2image
-pypdf
 langchain
 langgraph
 langchain-google-genai

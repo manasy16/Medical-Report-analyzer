@@ -60,12 +60,6 @@ async def upload_file(
         )
 
     file_bytes = await file.read()
-    max_upload_mb = 8
-    if len(file_bytes) > max_upload_mb * 1024 * 1024:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File is too large. Please upload a PDF or image under {max_upload_mb} MB."
-        )
 
     # Get history context if member_id is provided
     history_context = ""
@@ -77,7 +71,7 @@ async def upload_file(
     # ── Run the LangGraph pipeline (Synchronous) ──────────────
     try:
         print(f"[PIPELINE] Running analysis...")
-        result = await asyncio.to_thread(run_graph, file_bytes, language, history_context)
+        result = run_graph(file_bytes, language, history_context)
         
         if not result:
             raise HTTPException(status_code=500, detail="Analysis failed to produce a result")
