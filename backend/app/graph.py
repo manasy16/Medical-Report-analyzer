@@ -101,28 +101,28 @@ REFERENCE_RANGES = {
 # ── LLM setup ────────────────────────────────────────────────
 # ── LLM setup — 3 models across 3 different servers ──────────
 
-# Primary: Google AI Studio
-_gemini = ChatGoogleGenerativeAI(
-    model="gemini-2.0-flash",
-    temperature=0
-)
-
-# Fallback 1: Groq (Llama 3.3 70B) — completely different server
+# Primary: Groq (Llama 3.3 70B) — completely different server
 _groq = ChatGroq(
     model="llama-3.3-70b-versatile",
     temperature=0,
     api_key=os.getenv("GROQ_API_KEY")
 )
 
-# Fallback 2: Mistral AI — third independent server
+# Fallback 1: Mistral AI — third independent server
 _mistral = ChatMistralAI(
     model="mistral-small-latest",
     temperature=0,
     api_key=os.getenv("MISTRAL_API_KEY")
 )
 
-# Chain them — if Gemini fails, tries Groq, then Mistral
-llm = _gemini.with_fallbacks([_groq, _mistral])
+# Fallback 2: Google AI Studio (Gemini)
+_gemini = ChatGoogleGenerativeAI(
+    model="gemini-2.0-flash",
+    temperature=0
+)
+
+# Chain them — Groq primary, then Mistral, then Gemini
+llm = _groq.with_fallbacks([_mistral, _gemini])
 
 # ── Retry wrapper — handles temporary 503 spikes ─────────────
 @retry(
