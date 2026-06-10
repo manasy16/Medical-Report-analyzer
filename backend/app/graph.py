@@ -218,14 +218,16 @@ def _looks_like_medical_text(text: str) -> bool:
     """
     if len(text) < 80:
         return False
-    return bool(re.search(
-        r"\\b(hemoglobin|haemoglobin|wbc|rbc|platelet|cholesterol|"
-        r"triglyceride|tsh|glucose|hba1c|creatinine|bilirubin|"
-        r"protein|urine|specific gravity|leukocyte|nitrite|ketone|"
-        r"albumin|sgpt|sgot|alt|ast|egfr|uric acid|thyroid)\\b",
-        text,
-        flags=re.IGNORECASE,
-    ))
+    # Simple keyword check — no word boundaries needed, just presence
+    keywords = [
+        "hemoglobin", "haemoglobin", "wbc", "rbc", "platelet",
+        "cholesterol", "triglyceride", "tsh", "glucose", "hba1c",
+        "creatinine", "bilirubin", "protein", "urine", "specific gravity",
+        "leukocyte", "nitrite", "ketone", "albumin", "sgpt", "sgot",
+        "alt", "ast", "egfr", "uric acid", "thyroid",
+    ]
+    lower = text.lower()
+    return any(kw in lower for kw in keywords)
 
 
 # ============================================================
