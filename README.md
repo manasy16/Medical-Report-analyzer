@@ -2,7 +2,7 @@
 
 An AI-powered web application that reads medical reports (PDF or image), extracts all parameters, and generates easy-to-understand summaries in **English, Hindi, and Hinglish** — built as a college mini project with production-grade architecture.
 
-**Live Demo:** [[your-app.onrender.com](https://your-app.onrender.com](https://medical-report-analyzer-1-ig02.onrender.com))
+**Live Demo:--  https://medical-report-analyzer-1-ig02.onrender.com
 
 ---
 
