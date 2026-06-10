@@ -109,6 +109,7 @@ REFERENCE_RANGES = {
 _groq = ChatGroq(
     model="llama-3.3-70b-versatile",
     temperature=0,
+    max_tokens=8192,        # llama-3.3-70b max output — prevents truncation
     api_key=os.getenv("GROQ_API_KEY")
 )
 
@@ -116,13 +117,15 @@ _groq = ChatGroq(
 _mistral = ChatMistralAI(
     model="mistral-small-latest",
     temperature=0,
+    max_tokens=8192,
     api_key=os.getenv("MISTRAL_API_KEY")
 )
 
 # Fallback 2: Google AI Studio (Gemini)
 _gemini = ChatGoogleGenerativeAI(
     model="gemini-2.0-flash",
-    temperature=0
+    temperature=0,
+    max_output_tokens=8192, # Gemini uses max_output_tokens not max_tokens
 )
 
 # Chain them — Groq primary, then Mistral, then Gemini
@@ -172,8 +175,11 @@ def parse_llm_json(raw: str, node_name: str) -> Optional[dict]:
     """
     try:
         text = raw.strip()
-        # Remove markdown fences like ```json ... ```
-        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.MULTILINE).strip()
+        # Strip opening fence — works even if response was truncated (no closing fence)
+        text = re.sub(r"^```(?:json)?[ \t]*\n?", "", text, flags=re.MULTILINE)
+        # Strip closing fence if present
+        text = re.sub(r"\n?```[ \t]*$", "", text, flags=re.MULTILINE)
+        text = text.strip()
         
         # Fix invalid escape sequences produced by Groq/Mistral
         # e.g. \व becomes \\व so json.loads doesn't choke
