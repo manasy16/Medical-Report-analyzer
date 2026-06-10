@@ -26,6 +26,10 @@ from PIL import Image
 from pdf2image import convert_from_bytes
 from dotenv import load_dotenv
 from pathlib import Path
+try:
+    from pypdf import PdfReader
+except ImportError:
+    PdfReader = None   # pypdf optional — OCR fallback used if missing
 
 # ── Load .env ────────────────────────────────────────────────
 env_path = Path(__file__).parent / ".env"
@@ -105,7 +109,6 @@ REFERENCE_RANGES = {
 _groq = ChatGroq(
     model="llama-3.3-70b-versatile",
     temperature=0,
-    max_tokens=8192,
     api_key=os.getenv("GROQ_API_KEY")
 )
 
@@ -113,15 +116,13 @@ _groq = ChatGroq(
 _mistral = ChatMistralAI(
     model="mistral-small-latest",
     temperature=0,
-    max_tokens=8192,
     api_key=os.getenv("MISTRAL_API_KEY")
 )
 
 # Fallback 2: Google AI Studio (Gemini)
 _gemini = ChatGoogleGenerativeAI(
     model="gemini-2.0-flash",
-    temperature=0,
-    max_output_tokens=8192,
+    temperature=0
 )
 
 # Chain them — Groq primary, then Mistral, then Gemini
@@ -165,31 +166,67 @@ class State(TypedDict):
 def parse_llm_json(raw: str, node_name: str) -> Optional[dict]:
     """
     Safely parse JSON from LLM response.
-    - Strips opening ```json fence even if response was truncated (no closing fence)
-    - Strips closing ``` fence if present
-    - Fixes invalid Unicode escape sequences from Groq/Mistral (e.g. \व → \\व)
-    - Returns None on failure so caller can handle gracefully
+    Strips ```json ... ``` fences if present.
+    Handles invalid Unicode escape sequences from non-Gemini models.
+    Returns None on failure (caller must handle it).
     """
     try:
         text = raw.strip()
-
-        # Strip opening fence — works even if truncated (no closing fence present)
-        text = re.sub(r"^```(?:json)?[ \t]*\n?", "", text, flags=re.MULTILINE)
-        # Strip closing fence if present
-        text = re.sub(r"\n?```[ \t]*$", "", text, flags=re.MULTILINE)
-        text = text.strip()
-
+        # Remove markdown fences like ```json ... ```
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.MULTILINE).strip()
+        
         # Fix invalid escape sequences produced by Groq/Mistral
-        # e.g. \व becomes \\व so json.loads doesn't choke on Hindi text
+        # e.g. \व becomes \\व so json.loads doesn't choke
         text = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
-
+        
         result = json.loads(text)
         if not isinstance(result, dict):
             raise ValueError("Expected a JSON object (dict)")
         return result
     except (json.JSONDecodeError, ValueError) as e:
-        logger.error("[%s] JSON parse failed: %s | Raw output: %.300s", node_name, e, raw)
+        logger.error("[%s] JSON parse failed: %s | Raw output: %.200s", node_name, e, raw)
         return None
+
+# ============================================================
+# NODE 1 — OCR HELPERS
+# ============================================================
+
+def _extract_pdf_text(file_bytes: bytes) -> str:
+    """
+    Fast path: extract embedded text directly from a digital PDF.
+    Skips Tesseract entirely when the PDF already has selectable text.
+    Returns empty string if pypdf is unavailable or extraction fails.
+    """
+    if PdfReader is None:
+        return ""
+    if file_bytes[:4] != b"%PDF":
+        return ""
+    try:
+        reader = PdfReader(io.BytesIO(file_bytes))
+        pages  = reader.pages[:6]
+        text   = "\n".join((page.extract_text() or "") for page in pages)
+        return text.strip()
+    except Exception as e:
+        logger.info("[OCR] PDF embedded text extraction failed: %s", e)
+        return ""
+
+
+def _looks_like_medical_text(text: str) -> bool:
+    """
+    Sanity check — confirms extracted text actually contains
+    medical keywords before skipping Tesseract entirely.
+    """
+    if len(text) < 80:
+        return False
+    return bool(re.search(
+        r"\\b(hemoglobin|haemoglobin|wbc|rbc|platelet|cholesterol|"
+        r"triglyceride|tsh|glucose|hba1c|creatinine|bilirubin|"
+        r"protein|urine|specific gravity|leukocyte|nitrite|ketone|"
+        r"albumin|sgpt|sgot|alt|ast|egfr|uric acid|thyroid)\\b",
+        text,
+        flags=re.IGNORECASE,
+    ))
+
 
 # ============================================================
 # NODE 1 — OCR
@@ -197,14 +234,29 @@ def parse_llm_json(raw: str, node_name: str) -> Optional[dict]:
 
 def ocr_node(state: State):
     file_bytes = state["file"]
-    print(f"[OCR] POPPLER_PATH = {POPPLER_PATH}")
     print(f"[OCR] File size = {len(file_bytes)} bytes")
+
+    # Fast path: try embedded PDF text first (skips Tesseract)
+    pdf_text = _extract_pdf_text(file_bytes)
+    if _looks_like_medical_text(pdf_text):
+        print(f"[OCR] Used embedded PDF text — skipped Tesseract ({len(pdf_text)} chars)")
+        return {"raw_text": pdf_text}
+
+    # Slow path: Tesseract OCR
+    print(f"[OCR] POPPLER_PATH = {POPPLER_PATH}")
+    print(f"[OCR] Embedded text insufficient — running Tesseract")
     text = ""
     try:
-        images = convert_from_bytes(file_bytes, poppler_path=POPPLER_PATH, dpi=150)
+        images = convert_from_bytes(
+            file_bytes,
+            poppler_path=POPPLER_PATH,
+            dpi=int(os.getenv("OCR_DPI", "120")),
+            grayscale=True,
+            thread_count=2,
+        )
         print(f"[OCR] Pages converted: {len(images)}")
         for img in images:
-            config = r"--oem 3 --psm 6"
+            config = r"--oem 1 --psm 6"
             page_text = pytesseract.image_to_string(img, config=config)
             print(f"[OCR] Page text length: {len(page_text)}")
             text += page_text
@@ -212,11 +264,12 @@ def ocr_node(state: State):
         print(f"[OCR] PDF conversion failed: {e}")
         try:
             image = Image.open(io.BytesIO(file_bytes))
-            text = pytesseract.image_to_string(image, config=r"--oem 3 --psm 6")
+            text  = pytesseract.image_to_string(image, config=r"--oem 1 --psm 6")
             print(f"[OCR] Image fallback text length: {len(text)}")
         except Exception as e2:
             print(f"[OCR] Image fallback also failed: {e2}")
             text = ""
+
     print(f"[OCR] Total text extracted: {len(text)} chars")
     return {"raw_text": text}
 
@@ -237,11 +290,49 @@ def cleaner_node(state: State):
 # NODE 2b — REPORT TYPE DETECTOR
 # ============================================================
 
+# Keyword lists for local (zero-LLM) type detection
+REPORT_TYPE_KEYWORDS = {
+    "cbc"     : ["hemoglobin", "haemoglobin", "wbc", "rbc", "platelet", "packed cell", "mcv", "mch", "mchc", "rdw"],
+    "lipid"   : ["cholesterol", "ldl", "hdl", "triglyceride", "vldl"],
+    "thyroid" : ["tsh", "thyroid", "ft3", "ft4"],
+    "liver"   : ["sgpt", "sgot", "alt", "ast", "bilirubin", "albumin", "alkaline phosphatase", "alp"],
+    "kidney"  : ["creatinine", "urea", "bun", "egfr", "uric acid"],
+    "diabetes": ["hba1c", "fasting blood sugar", "fbs", "post prandial", "ppbs", "blood glucose"],
+    "urine"   : ["urine", "specific gravity", "leukocyte esterase", "nitrite", "ketone", "urine routine"],
+}
+
+
+def _detect_type_locally(text: str) -> str:
+    """
+    Keyword-based report type detection — no LLM call needed.
+    Scores each type by how many of its keywords appear in the text.
+    Returns 'unknown' only if no keywords match at all.
+    """
+    lower = text.lower()
+    scores = {
+        rtype: sum(1 for kw in keywords if kw in lower)
+        for rtype, keywords in REPORT_TYPE_KEYWORDS.items()
+    }
+    best_type, best_score = max(scores.items(), key=lambda item: item[1])
+    logger.info("[detect_type] Local keyword scores: %s", scores)
+    return best_type if best_score >= 2 else "unknown"
+
+
 def report_type_detector_node(state: State):
     """
     Reads the cleaned text and identifies what kind of medical
     report it is. This tells every downstream node what to do.
+    Tries local keyword detection first — only calls the LLM
+    if keywords are ambiguous (score < 2 matches).
     """
+    # Fast path — keyword match, zero LLM cost
+    local_type = _detect_type_locally(state["cleaned_text"])
+    if local_type != "unknown":
+        logger.info("[detect_type] Local detection succeeded: %s — skipping LLM", local_type)
+        return {"report_type": local_type}
+
+    # Slow path — LLM only reached when keywords are ambiguous
+    logger.info("[detect_type] Local detection inconclusive — calling LLM")
     prompt = ChatPromptTemplate.from_template("""
 You are a medical document classifier. Read the text below and identify 
 what type of medical report it is.
