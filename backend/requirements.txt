@@ -17,3 +17,4 @@ pyjwt
 python-jose[cryptography]
 email-validator
 pypdf>=3.0.0
+psycopg2-binary>=2.9.0
