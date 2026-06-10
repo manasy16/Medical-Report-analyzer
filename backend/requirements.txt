@@ -16,3 +16,4 @@ passlib[bcrypt]
 pyjwt
 python-jose[cryptography]
 email-validator
+pypdf>=3.0.0
